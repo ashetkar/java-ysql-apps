@@ -110,7 +110,6 @@ public class TestApp {
 
     private static void testConcurrentConnectionCreations(String url, Map<String,
             Integer> expected1, String controlHost) throws SQLException, InterruptedException {
-        System.out.println("Running testConcurrentConnectionCreations() with url " + url);
         startYBDBCluster();
         System.out.println("Cluster started!");
         Thread.sleep(5000);
@@ -146,6 +145,7 @@ public class TestApp {
                 }
                 long elapsed = System.currentTimeMillis() - start;
                 System.out.println("[Iteration " + iteration + "] All " + numThreads + " threads completed their tasks in " + elapsed + " ms");
+                times[iteration] = elapsed;
 
                 StringBuilder msg = new StringBuilder();
                 for (Map.Entry<String, Integer> e : expected1.entrySet()) {
