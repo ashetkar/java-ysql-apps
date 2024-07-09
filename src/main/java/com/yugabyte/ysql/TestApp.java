@@ -9,18 +9,34 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static com.yugabyte.ysql.LoadBalanceProperties.CONNECTION_MANAGER_MAP;
 
 public class TestApp {
 
     private static int numConnectionsPerThread = 6;
     private static int numThreads = 25;
     public static final String path = System.getenv("YBDB_PATH");
+    private static boolean useVanillaPGJDBC = false; // CHANGE pom.xml to include appropriate driver if you change this
 
     public static void main(String[] args) throws SQLException, InterruptedException {
-        simpleApp();
-//        performanceApp(false);
-//        performanceApp(true);
+        if (args == null || args.length < 1) {
+            System.out.println("Usage: TestApp [1|2 [pgjdbc]|3 [pgjdbc]]");
+            return;
+        }
+        switch (args[0]) {
+            case "1":
+                simpleApp();
+                break;
+            case "2":
+                useVanillaPGJDBC = args.length > 1 && "pgjdbc".equalsIgnoreCase(args[1]);
+                performanceApp(true);
+                break;
+            case "3":
+                useVanillaPGJDBC = args.length > 1 && "pgjdbc".equalsIgnoreCase(args[1]);
+                performanceApp(false);
+                break;
+            default:
+                System.out.println("Usage: TestApp [1|2 [pgjdbc]|3 [pgjdbc]]");
+        }
     }
 
     private static void simpleApp() throws SQLException {
@@ -45,11 +61,18 @@ public class TestApp {
         if (path == null || path.trim().isEmpty()) {
             throw new IllegalStateException("YBDB_PATH not defined.");
         }
-        int total = numThreads * numConnectionsPerThread;
-        Map<String, Integer> expected1 = expectedInput(total/3 + 1, total/3, total/3);
         // &loggerLevel=DEBUG";
-        String baseUrl = "jdbc:yugabytedb://localhost:5433/yugabyte?load-balance=true"
-                + "&" + LoadBalanceProperties.REFRESH_INTERVAL_KEY + "=300";
+        String baseUrl = "jdbc:" + (useVanillaPGJDBC ? "postgresql" : "yugabytedb")
+                + "://localhost:5433/yugabyte?load-balance=true&yb-servers-refresh-interval=300";
+        System.out.println("Running perf tests for " + (serial ? "serial" : "concurrent")
+                + " connections with " + (useVanillaPGJDBC ? "PGJDBC" : "Smart") + " driver, with url: " + baseUrl);
+        int total = numThreads * numConnectionsPerThread;
+        Map<String, Integer> expected1;
+        if (useVanillaPGJDBC) {
+            expected1 = expectedInput(total, 0, 0);
+        } else {
+            expected1 = expectedInput(total/3 + 1, total/3, total/3);
+        }
         if (serial) {
             testSingleThreadConnectionCreations(baseUrl, expected1, "127.0.0.1");
         } else {
@@ -83,8 +106,10 @@ public class TestApp {
         startYBDBCluster();
         System.out.println("Cluster started!");
         Thread.sleep(5000);
+        int iterations = 10;
+        long[] times = new long[iterations];
         try {
-            for (int iteration = 0; iteration < 10; iteration++) {
+            for (int iteration = 0; iteration < iterations; iteration++) {
                 Thread[] threads = new Thread[numThreads];
                 Connection[][] connections = new Connection[numThreads][numConnectionsPerThread];
 
@@ -114,10 +139,11 @@ public class TestApp {
                 long elapsed = System.currentTimeMillis() - start;
                 System.out.println("[Iteration " + iteration + "] All " + numThreads + " threads completed their tasks in " + elapsed + " ms");
 
+                StringBuilder msg = new StringBuilder();
                 for (Map.Entry<String, Integer> e : expected1.entrySet()) {
-                    verifyOn(e.getKey(), e.getValue(), controlHost);
-                    System.out.print(", ");
+                    msg.append(verifyOn(e.getKey(), e.getValue(), controlHost)).append(", ");
                 }
+                System.out.println(msg);
 
 //                System.out.println("Closing connections ...");
                 for (int i = 0; i < numThreads; i++) {
@@ -126,27 +152,33 @@ public class TestApp {
                     }
                 }
             }
+            long avg = 0;
+            for (int i = 1; i < iterations; i++) { // skip the first one
+                avg += times[i];
+            }
+            avg = avg / (iterations-1);
+            System.out.println("Average time " + avg + " ms");
 
         } finally {
-            CONNECTION_MANAGER_MAP.clear();
             executeCmd(path + "/bin/yb-ctl destroy", "Stop YugabyteDB cluster", 15);
         }
     }
 
     private static void testSingleThreadConnectionCreations(String url, Map<String,
             Integer> expected1, String controlHost) throws SQLException, InterruptedException {
-        System.out.println("\nRunning testSingleThreadConnectionCreations() with url " + url);
         startYBDBCluster();
         System.out.println("Cluster started!");
         Thread.sleep(5000);
+        int totalConnections = 150;
+        int iterations = 10;
+        long[] times = new long[iterations];
         try {
-            for (int iteration = 0; iteration < 1; iteration++) {
-                int total = 150;
-                Connection[] connections = new Connection[total];
+            for (int iteration = 0; iteration < iterations; iteration++) {
+                Connection[] connections = new Connection[totalConnections];
 
-    //            System.out.println("Creating " + total + " connections ...");
+    //            System.out.println("Creating " + totalConnections + " connections ...");
                 long start = System.currentTimeMillis();
-                for (int i = 0 ; i < total; i++) {
+                for (int i = 0 ; i < totalConnections; i++) {
                     try {
                         connections[i] = DriverManager.getConnection(url, "yugabyte", "yugabyte");
                     } catch (SQLException e) {
@@ -154,20 +186,27 @@ public class TestApp {
                     }
                 }
                 long elapsed = System.currentTimeMillis() - start;
-                System.out.println("[Iteration " + iteration + "] All " + total + " connections created in " + elapsed + " ms");
+                System.out.println("[Iteration " + iteration + "] All " + totalConnections + " connections created in " + elapsed + " ms");
+                times[iteration] = elapsed;
 
+                StringBuilder msg = new StringBuilder("");
                 for (Map.Entry<String, Integer> e : expected1.entrySet()) {
-                    verifyOn(e.getKey(), e.getValue(), controlHost);
-                    System.out.print(", ");
+                    msg.append(verifyOn(e.getKey(), e.getValue(), controlHost)).append(", ");
                 }
+                System.out.print(msg);
 
-                System.out.println("Closing connections ...");
-                for (int i = 0 ; i < total; i++) {
+//                System.out.println("Closing connections ...");
+                for (int i = 0 ; i < totalConnections; i++) {
                     connections[i].close();
                 }
             }
+            long avg = 0;
+            for (int i = 1; i < iterations; i++) { // skip the first one
+                avg += times[i];
+            }
+            avg = avg / (iterations-1);
+            System.out.println("Average time " + avg + " ms");
         } finally {
-            CONNECTION_MANAGER_MAP.clear();
             executeCmd(path + "/bin/yb-ctl destroy", "Stop YugabyteDB cluster", 15);
         }
     }
@@ -190,7 +229,8 @@ public class TestApp {
         }
     }
 
-    public static void verifyOn(String server, int expectedCount, String multipurposeParam) {
+    public static String verifyOn(String server, int expectedCount, String multipurposeParam) {
+        String msg = "";
         try {
             ProcessBuilder builder = new ProcessBuilder();
             builder.command("sh", "-c", "curl http://" + server + ":13000/rpcz");
@@ -205,15 +245,15 @@ public class TestApp {
                 throw new RuntimeException("Could not access /rpcz on " + server + "\n" + out);
             }
             String[] count = result.split("client backend");
-            System.out.print(server + " = " + (count.length - 1));
+            msg = server + " = " + (count.length - 1);
             // Server side validation
             if (expectedCount != (count.length - 1)) {
                 throw new RuntimeException("Client backend processes did not match for " + server + ", " +
                         "(expected, actual): " + expectedCount + ", " + (count.length - 1));
             }
             // Client side validation
-            if ("skip".equals(multipurposeParam)) {
-                return;
+            if (useVanillaPGJDBC) {
+                return msg;
             }
             int recorded = LoadBalanceService.getLoad(server);
             if (server.equalsIgnoreCase(multipurposeParam)) {
@@ -227,5 +267,6 @@ public class TestApp {
         } catch (IOException | InterruptedException e) {
             System.out.println("Verification failed: " + e);
         }
+        return msg;
     }
 }
