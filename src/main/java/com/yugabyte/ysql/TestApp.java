@@ -20,7 +20,7 @@ public class TestApp {
 
     public static void main(String[] args) throws SQLException, InterruptedException {
         if (args == null || args.length < 1) {
-            System.out.println("Usage: TestApp [1|2 [pgjdbc]|3 [pgjdbc]]");
+            printUsage();
             return;
         }
         switch (args[0]) {
@@ -36,10 +36,18 @@ public class TestApp {
                 performanceApp(false);
                 break;
             default:
-                System.out.println("Usage: TestApp [1|2 [pgjdbc]|3 [pgjdbc]]");
+                printUsage();
         }
     }
 
+    private static void printUsage() {
+        System.out.println("CLI arguments:");
+        System.out.println("        \"1\"        - Run simpleApp()");
+        System.out.println("        \"2\"        - Run performanceApp() in single thread with JDBC Smart driver");
+        System.out.println("        \"2 pgjdbc\" - Run performanceApp() in single thread with PGJDBC driver");
+        System.out.println("        \"3\"        - Run performanceApp() in multiple threads with JDBC Smart driver");
+        System.out.println("        \"3 pgjdbc\" - Run performanceApp() in multiple threads with PGJDBC driver");
+    }
     private static void simpleApp() throws SQLException {
         String url = "jdbc:yugabytedb://localhost/yugabyte?load_balance=true";
 
