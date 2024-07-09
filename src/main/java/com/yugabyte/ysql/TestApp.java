@@ -14,8 +14,9 @@ public class TestApp {
 
     private static int numConnectionsPerThread = 6;
     private static int numThreads = 25;
+    private static int totalConnections = numThreads * numConnectionsPerThread;
     public static final String path = System.getenv("YBDB_PATH");
-    private static boolean useVanillaPGJDBC = false; // CHANGE pom.xml to include appropriate driver if you change this
+    private static boolean useVanillaPGJDBC = false;
 
     public static void main(String[] args) throws SQLException, InterruptedException {
         if (args == null || args.length < 1) {
@@ -66,12 +67,11 @@ public class TestApp {
                 + "://localhost:5433/yugabyte?load-balance=true&yb-servers-refresh-interval=300";
         System.out.println("Running perf tests for " + (serial ? "serial" : "concurrent")
                 + " connections with " + (useVanillaPGJDBC ? "PGJDBC" : "Smart") + " driver, with url: " + baseUrl);
-        int total = numThreads * numConnectionsPerThread;
         Map<String, Integer> expected1;
         if (useVanillaPGJDBC) {
-            expected1 = expectedInput(total, 0, 0);
+            expected1 = expectedInput(totalConnections, 0, 0);
         } else {
-            expected1 = expectedInput(total/3 + 1, total/3, total/3);
+            expected1 = expectedInput(totalConnections/3 + 1, totalConnections/3, totalConnections/3);
         }
         if (serial) {
             testSingleThreadConnectionCreations(baseUrl, expected1, "127.0.0.1");
@@ -169,7 +169,6 @@ public class TestApp {
         startYBDBCluster();
         System.out.println("Cluster started!");
         Thread.sleep(5000);
-        int totalConnections = 150;
         int iterations = 10;
         long[] times = new long[iterations];
         try {
