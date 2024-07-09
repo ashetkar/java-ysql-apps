@@ -17,3 +17,5 @@
     ```
     YBDB_PATH=<path/to/YugabyteDB/installation/dir> mvn compile exec:java -Dexec.mainClass="com.yugabyte.ysql.TestApp" -Dexec.args="2 pgjdbc"
     ```
+
+- More apps may follow.
